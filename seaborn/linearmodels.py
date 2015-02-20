@@ -686,7 +686,7 @@ class _RegressionPlotter(_LinearPlotter):
                     ax.plot([x, x], ci, **ci_kws)
             ax.scatter(xs, ys, **kws)
 
-    def lineplot(self, ax, kws):
+    def lineplot(self, ax, kws, annotate_template):
         """Draw the model."""
         xlim = ax.get_xlim()
 
@@ -703,6 +703,67 @@ class _RegressionPlotter(_LinearPlotter):
         if err_bands is not None:
             ax.fill_between(grid, *err_bands, color=fill_color, alpha=.15)
         ax.set_xlim(*xlim)
+        
+        if annotate_template and fit:
+            self.annotate_(ax, fit, annotate_template)
+        
+    def annotate(self, ax, fit, template, stat=None, loc="best", **kwargs):
+        """Annotate the plot with a statistic about the relationship.
+
+        Parameters
+        ----------
+        func : callable
+            Statistical function that maps the x, y vectors either to (val, p)
+            or to val.
+        template : string format template, optional
+            The template must have the format keys "stat" and "val";
+            if `func` returns a p value, it should also have the key "p".
+        stat : string, optional
+            Name to use for the statistic in the annotation, by default it
+            uses the name of `func`.
+        loc : string or int, optional
+            Matplotlib legend location code; used to place the annotation.
+        kwargs : key, value mappings
+            Other keyword arguments are passed to `ax.legend`, which formats
+            the annotation.
+
+        Returns
+        -------
+        self : JointGrid instance.
+            Returns `self`.
+
+        """
+        default_template = "{stat} = {val:.2g}; p = {p:.2g}"
+
+        # Call the function and determine the form of the return value(s)
+        out = func(self.x, self.y)
+        try:
+            val, p = out
+        except TypeError:
+            val, p = out, None
+            default_template, _ = default_template.split(";")
+
+        # Set the default template
+        if template is None:
+            template = default_template
+
+        # Default to name of the function
+        if stat is None:
+            stat = func.__name__
+
+        # Format the annotation
+        if p is None:
+            annotation = template.format(stat=stat, val=val)
+        else:
+            annotation = template.format(stat=stat, val=val, p=p)
+
+        # Draw an invisible plot and use the legend to draw the annotation
+        # This is a bit of a hack, but `loc=best` works nicely and is not
+        # easily abstracted.
+        phantom, = ax.plot(self.x, self.y, linestyle="", alpha=0)
+        ax.legend([phantom], [annotation], loc=loc, **kwargs)
+        phantom.remove()
+
 
 
 def lmplot(x, y, data, hue=None, col=None, row=None, palette=None,
