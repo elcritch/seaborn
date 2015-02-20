@@ -507,20 +507,21 @@ class _RegressionPlotter(_LinearPlotter):
             grid = np.linspace(x_min, x_max, 100)
         ci = self.ci
 
+        fit = None
         # Fit the regression
         if self.order > 1:
             yhat, yhat_boots = self.fit_poly(grid, self.order)
         elif self.logistic:
             from statsmodels.genmod.generalized_linear_model import GLM
             from statsmodels.genmod.families import Binomial
-            yhat, yhat_boots = self.fit_statsmodels(grid, GLM,
+            yhat, yhat_boots, fit = self.fit_statsmodels(grid, GLM,
                                                     family=Binomial())
         elif self.lowess:
             ci = None
             grid, yhat = self.fit_lowess()
         elif self.robust:
             from statsmodels.robust.robust_linear_model import RLM
-            yhat, yhat_boots = self.fit_statsmodels(grid, RLM)
+            yhat, yhat_boots, fit = self.fit_statsmodels(grid, RLM)
         elif self.logx:
             yhat, yhat_boots = self.fit_logx(grid)
         else:
@@ -532,7 +533,7 @@ class _RegressionPlotter(_LinearPlotter):
         else:
             err_bands = utils.ci(yhat_boots, ci, axis=0)
 
-        return grid, yhat, err_bands
+        return grid, yhat, err_bands, fit
 
     def fit_fast(self, grid):
         """Low-level regression and prediction using linear algebra."""
@@ -564,14 +565,15 @@ class _RegressionPlotter(_LinearPlotter):
         """More general regression function using statsmodels objects."""
         X, y = np.c_[np.ones(len(self.x)), self.x], self.y
         grid = np.c_[np.ones(len(grid)), grid]
-        reg_func = lambda _x, _y: model(_y, _x, **kwargs).fit().predict(grid)
+        fit = model(_y, _x, **kwargs).fit()
+        reg_func = lambda _x, _y: fit.predict(grid)
         yhat = reg_func(X, y)
         if self.ci is None:
             return yhat, None
 
         yhat_boots = algo.bootstrap(X, y, func=reg_func,
                                     n_boot=self.n_boot, units=self.units)
-        return yhat, yhat_boots
+        return yhat, yhat_boots, fit
 
     def fit_lowess(self):
         """Fit a locally-weighted regression, which returns its own grid."""
@@ -689,7 +691,7 @@ class _RegressionPlotter(_LinearPlotter):
         xlim = ax.get_xlim()
 
         # Fit the regression model
-        grid, yhat, err_bands = self.fit_regression(ax)
+        grid, yhat, err_bands, fit = self.fit_regression(ax)
 
         # Get set default aesthetics
         fill_color = kws["color"]
