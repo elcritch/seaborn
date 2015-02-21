@@ -24,6 +24,7 @@ from .palettes import color_palette
 from .axisgrid import FacetGrid, PairGrid
 from .distributions import kdeplot
 
+print("Modified")
 
 class _LinearPlotter(object):
     """Base class for plotting relational data in tidy format.
@@ -399,7 +400,7 @@ class _RegressionPlotter(_LinearPlotter):
                  units=None, order=1, logistic=False, lowess=False,
                  robust=False, logx=False, x_partial=None, y_partial=None,
                  truncate=False, dropna=True, x_jitter=None, y_jitter=None,
-                 color=None, label=None):
+                 color=None, label=None, annotate_template=None):
 
         # Set member attributes
         self.x_estimator = x_estimator
@@ -418,7 +419,10 @@ class _RegressionPlotter(_LinearPlotter):
         self.y_jitter = y_jitter
         self.color = color
         self.label = label
+        self.annotate_template = annotate_template
 
+        print("_RegressionPlotter::__init__:",self.annotate_template)
+        
         # Validate the regression options:
         if sum((order > 1, logistic, robust, lowess, logx)) > 1:
             raise ValueError("Mutually exclusive regression options.")
@@ -510,21 +514,27 @@ class _RegressionPlotter(_LinearPlotter):
         fit = None
         # Fit the regression
         if self.order > 1:
+            print("fit_regression::order")
             yhat, yhat_boots = self.fit_poly(grid, self.order)
         elif self.logistic:
+            print("fit_regression::logistic")
             from statsmodels.genmod.generalized_linear_model import GLM
             from statsmodels.genmod.families import Binomial
             yhat, yhat_boots, fit = self.fit_statsmodels(grid, GLM,
                                                     family=Binomial())
         elif self.lowess:
+            print("fit_regression::lowess")
             ci = None
             grid, yhat = self.fit_lowess()
         elif self.robust:
+            print("fit_regression::robust")
             from statsmodels.robust.robust_linear_model import RLM
             yhat, yhat_boots, fit = self.fit_statsmodels(grid, RLM)
         elif self.logx:
+            print("fit_regression::logx")
             yhat, yhat_boots = self.fit_logx(grid)
         else:
+            print("fit_regression::fast")
             yhat, yhat_boots = self.fit_fast(grid)
 
         # Compute the confidence interval at each grid point
@@ -565,12 +575,37 @@ class _RegressionPlotter(_LinearPlotter):
         """More general regression function using statsmodels objects."""
         X, y = np.c_[np.ones(len(self.x)), self.x], self.y
         grid = np.c_[np.ones(len(grid)), grid]
-        fit = model(_y, _x, **kwargs).fit()
-        reg_func = lambda _x, _y: fit.predict(grid)
-        yhat = reg_func(X, y)
+        
+        fit = model(y, X, **kwargs).fit()
+        yhat = fit.predict(grid)
+        
+        print("fit_statsmodels::X",X)
+        print("fit_statsmodels::y",y)
+        print("fit_statsmodels::y.mean:",y.mean())
+        print("fit_statsmodels::yhat",yhat)
+        print("fit_statsmodels::fit",fit, [ f for f in dir(fit) if '__' not in f] )
+        print("fit_statsmodels::fit.summary()",fit.summary2() )
+        print("fit_statsmodels::fit.resid:", fit.resid, )
+        print("fit_statsmodels::fit.sresid:", fit.sresid, )
+        print("fit_statsmodels::fit.remove_data:", fit.remove_data, )
+        print("fit_statsmodels::fit.fittedvalues:", fit.fittedvalues, )
+        print("fit_statsmodels::fit.normalized_cov_params:", fit.normalized_cov_params, )
+        print("fit_statsmodels::fit.df_resid:", fit.df_resid, )
+        
+        def rsquared(yy,yyhat, yresids):
+            ss_err=(yresids**2).sum()
+            ss_tot=((yy-yy.mean())**2).sum()
+            return 1.0-(ss_err/ss_tot)
+            
+        print("fit_statsmodels::rsquared:", rsquared(y, yhat, fit.resid) )
+        
+        print("fit_statsmodels::fit:(params:`%s`, rsquared:`%s`)"%(fit.params, getattr(fit, 'rsquared', None)))
+        
+        
         if self.ci is None:
-            return yhat, None
+            return yhat, None, fit
 
+        reg_func = lambda _x, _y: model(_y, _x, **kwargs).fit().predict(grid)
         yhat_boots = algo.bootstrap(X, y, func=reg_func,
                                     n_boot=self.n_boot, units=self.units)
         return yhat, yhat_boots, fit
@@ -686,7 +721,7 @@ class _RegressionPlotter(_LinearPlotter):
                     ax.plot([x, x], ci, **ci_kws)
             ax.scatter(xs, ys, **kws)
 
-    def lineplot(self, ax, kws, annotate_template):
+    def lineplot(self, ax, kws):
         """Draw the model."""
         xlim = ax.get_xlim()
 
@@ -704,8 +739,11 @@ class _RegressionPlotter(_LinearPlotter):
             ax.fill_between(grid, *err_bands, color=fill_color, alpha=.15)
         ax.set_xlim(*xlim)
         
-        if annotate_template and fit:
-            self.annotate_(ax, fit, annotate_template)
+        print("_RegressionPlotter::linewidth::annotate_template:",self.annotate_template)
+        print("_RegressionPlotter::linewidth::fit:",fit)
+        
+        if self.annotate_template and fit:
+            self.annotate_(ax, fit, self.annotate_template)
         
     def annotate(self, ax, fit, template, stat=None, loc="best", **kwargs):
         """Annotate the plot with a statistic about the relationship.
@@ -736,13 +774,8 @@ class _RegressionPlotter(_LinearPlotter):
         default_template = "{stat} = {val:.2g}; p = {p:.2g}"
 
         # Call the function and determine the form of the return value(s)
-        out = func(self.x, self.y)
-        try:
-            val, p = out
-        except TypeError:
-            val, p = out, None
-            default_template, _ = default_template.split(";")
-
+        # out = func(self.x, self.y)
+        
         # Set the default template
         if template is None:
             template = default_template
@@ -752,11 +785,10 @@ class _RegressionPlotter(_LinearPlotter):
             stat = func.__name__
 
         # Format the annotation
-        if p is None:
-            annotation = template.format(stat=stat, val=val)
-        else:
-            annotation = template.format(stat=stat, val=val, p=p)
+        annotation = template.format(**fit.__dict__)
 
+        print("lineplot::Annotate:", annotation, fit.__dict__)
+        
         # Draw an invisible plot and use the legend to draw the annotation
         # This is a bit of a hack, but `loc=best` works nicely and is not
         # easily abstracted.
@@ -1150,7 +1182,7 @@ def regplot(x, y, data=None, x_estimator=None, x_bins=None, x_ci=95,
             truncate=False, dropna=True, x_jitter=None, y_jitter=None,
             xlabel=None, ylabel=None, label=None,
             color=None, marker="o", scatter_kws=None, line_kws=None,
-            ax=None):
+            ax=None, annotate_template=None):
     """Draw a scatter plot between x and y with a regression line.
 
     Parameters
@@ -1248,7 +1280,8 @@ def regplot(x, y, data=None, x_estimator=None, x_bins=None, x_ci=95,
                                  scatter, fit_reg, ci, n_boot, units,
                                  order, logistic, lowess, robust, logx,
                                  x_partial, y_partial, truncate, dropna,
-                                 x_jitter, y_jitter, color, label)
+                                 x_jitter, y_jitter, color, label,
+                                 annotate_template=annotate_template)
 
     if ax is None:
         ax = plt.gca()
